@@ -3,7 +3,6 @@ use csv::WriterBuilder;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use tracing::{event, Level};
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -147,114 +146,34 @@ pub struct Skill {
     aspects: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
-pub struct SkillCsv {
-    #[serde(flatten)]
-    _not_nested_data: SkillNotNested,
-    #[serde(rename = "requiredReagents", serialize_with = "serialize_reagents")]
-    required_reagents: Vec<Reagents>,
-    #[serde(serialize_with = "serialize_aspects")]
-    aspects: Vec<String>,
-}
+pub fn to_json() -> Result<String> {
+    use flatten_json_object::{ArrayFormatting, Flattener};
+    use json_objects_to_csv::Json2Csv;
 
-impl std::borrow::Borrow<str> for Reagents {
-    fn borrow(&self) -> &str {
-        match self {
-            Reagents::SparklingPowder => "sparkling_powder",
-            Reagents::Blood => "blood",
-        }
-    }
-}
-
-impl std::fmt::Display for Reagents {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Reagents::SparklingPowder => write!(f, "sparkling_powder"),
-            Reagents::Blood => write!(f, "blood"),
-        }
-    }
-}
-
-fn serialize_reagents<S>(vec: &[Reagents], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&vec.join("|"))
-}
-
-fn serialize_aspects<S>(vec: &[String], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&vec.join("|"))
-}
-
-pub fn deserialize_json() -> Result<(Skill, PathBuf)> {
-    event!(Level::INFO, "Deserializing JSON");
-    let Some(path) = FileDialog::new()
+    event!(Level::DEBUG, "Reading file");
+    let Some(mut path) = FileDialog::new()
         .add_filter("text/json", &["json"])
         .pick_file()
     else {
         return Err(anyhow!("No file selected."));
     };
+    event!(Level::INFO, "Reading from {:#?}.", path);
     let file = std::fs::read_to_string(path.clone())?;
-    event!(Level::DEBUG, "{file}");
-
-    let file: Skill = serde_json::from_str(&file.trim())?;
     event!(Level::DEBUG, "{file:#?}");
 
-    Ok((file, path))
-}
+    let flattener = Flattener::new()
+        .set_key_separator(".")
+        .set_array_formatting(ArrayFormatting::Plain)
+        .set_preserve_empty_arrays(true)
+        .set_preserve_empty_objects(true);
+    let mut output = vec![];
+    let writer = WriterBuilder::new().from_writer(&mut output);
+    Json2Csv::new(flattener).convert_from_reader(file.as_bytes(), writer)?;
+    let output = std::str::from_utf8(&output)?;
 
-pub fn serialize_csv_to_file(skill: Skill, path: &mut PathBuf) -> Result<()> {
-    event!(Level::INFO, "Serializing CSV");
+    event!(Level::DEBUG, "{output:#?}");
+
     path.set_extension("csv");
-    let mut writer = WriterBuilder::new().from_writer(vec![]);
-
-    let csv = SkillCsv::from(skill);
-    writer.serialize(csv._not_nested_data)?;
-    // writer.write_record(["requiredReagents", "aspects"])?;
-    let not_nested = String::from_utf8(writer.into_inner()?)?;
-
-    // event!(Level::INFO, "{not_nested}");
-
-    let reagents = serialize_csv_vector(&csv.required_reagents)?;
-    println!("reagents : {}", reagents);
-    let aspects = serialize_csv_vector(&csv.aspects)?;
-    println!("as : {}", aspects);
-
-    let result = [not_nested, reagents, aspects].into_iter().fold(
-        (vec![], vec![]),
-        |(mut header, mut row), str| {
-            let split: Vec<&str> = str.split("\n").collect();
-            header.push(split[0].to_string());
-            row.push(split[1].to_string());
-            (header, row)
-        },
-    );
-    event!(Level::INFO, "{:#?}", result);
-    println!("{:#?}", result);
-
-    Ok(())
-}
-
-fn serialize_csv_vector<T>(data: &[T]) -> Result<Vec<T>>
-where
-    T: serde::Serialize + std::fmt::Display,
-{
-    let mut writer = WriterBuilder::new().has_headers(false).from_writer(vec![]);
-    writer.serialize(data)?;
-    writer.flush();
-
-    Ok(writer.into_inner()?)
-}
-
-impl From<Skill> for SkillCsv {
-    fn from(skill: Skill) -> Self {
-        Self {
-            _not_nested_data: skill._not_nested_data,
-            required_reagents: skill.required_reagents,
-            aspects: skill.aspects,
-        }
-    }
+    std::fs::write(path.clone(), output)?;
+    Ok(path.to_str().unwrap_or_default().to_string())
 }

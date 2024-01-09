@@ -1,13 +1,13 @@
-use std::fmt::Debug;
+mod state;
+mod ui_tracer;
+
 use std::sync::{Arc, Mutex};
 use tracing::{Event, Level, Subscriber};
-use tracing_subscriber::layer::Context;
-use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
+use tracing_subscriber::{layer::Context, registry::LookupSpan, Layer};
 
-mod state;
-pub mod ui_tracer;
 use state::{CollectedEvent, TracerLevel};
+
+pub use self::ui_tracer::LogUi;
 
 #[derive(Debug, Clone)]
 pub struct EventCollector {
@@ -16,7 +16,7 @@ pub struct EventCollector {
 }
 
 impl EventCollector {
-    pub fn level(level: Level) -> Self {
+    pub fn with_level(level: Level) -> Self {
         Self {
             level,
             events: Arc::new(Mutex::new(vec![])),

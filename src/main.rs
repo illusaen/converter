@@ -1,14 +1,14 @@
 use anyhow::{anyhow, Result};
 use eframe::egui;
+use tracer::{EventCollector, LogUi};
 use tracing::{event, Level};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod process;
-#[path = "tracer/lib.rs"]
 mod tracer;
 
 fn main() -> Result<()> {
-    let collector = tracer::EventCollector::level(Level::DEBUG);
+    let collector = EventCollector::with_level(Level::DEBUG);
     tracing_subscriber::registry()
         .with(collector.clone())
         .init();
@@ -28,11 +28,11 @@ fn main() -> Result<()> {
 
 #[derive(Debug)]
 struct App {
-    tracer_collector: tracer::EventCollector,
+    tracer_collector: EventCollector,
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Converter");
             ui.add_space(16.0);
@@ -40,24 +40,20 @@ impl eframe::App for App {
                 if ui.button("Convert to CSV").clicked()
                     || ctx.input(|i| i.key_pressed(egui::Key::Enter))
                 {
-                    match process::deserialize_json() {
-                        Ok((skill, mut path)) => {
-                            if let Err(e) = process::serialize_csv_to_file(skill, &mut path) {
-                                event!(Level::ERROR, "Failed to serialize CSV: {}", e);
-                            }
-                        }
-                        Err(e) => event!(Level::ERROR, "Failed to deserialize JSON: {}", e),
+                    match process::to_json() {
+                        Ok(path) => event!(Level::INFO, "Wrote {} to file.", path),
+                        Err(e) => event!(Level::ERROR, "{:#?}", e),
                     }
                 }
             });
             ui.separator();
-            ui.add(tracer::ui_tracer::LogUi::new(self.tracer_collector.clone()));
+            LogUi::new(self.tracer_collector.clone()).ui(ui);
         });
     }
 }
 
 impl App {
-    fn with_collector(collector: tracer::EventCollector) -> Self {
+    fn with_collector(collector: EventCollector) -> Self {
         Self {
             tracer_collector: collector,
         }
